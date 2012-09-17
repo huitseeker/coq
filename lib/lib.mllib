@@ -4,6 +4,7 @@ Compat
 Flags
 Segmenttree
 Unicodetable
+Smap
 Util
 Errors
 Bigint

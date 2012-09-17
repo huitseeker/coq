@@ -69,7 +69,6 @@ type obj_typ = {
   o_INJ : int;      (** position of trivial argument *)
   o_TABS : constr list;    (** ordered *)
   o_TPARAMS : constr list; (** ordered *)
-  o_NPARAMS : int;
   o_TCOMPS : constr list } (** ordered *)
 
 val cs_pattern_of_constr : constr -> cs_pattern * int * constr list

@@ -5,6 +5,7 @@ Compat
 Flags
 Segmenttree
 Unicodetable
+Smap
 Util
 Option
 Hashcons

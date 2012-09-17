@@ -232,7 +232,7 @@ IDEMOD:=$(shell cat ide/ide.mllib)
 # coqmktop, coqc
 
 COQENVCMO:=$(CONFIG) \
-  lib/pp_control.cmo lib/pp.cmo  lib/compat.cmo lib/flags.cmo \
+  lib/pp_control.cmo lib/pp.cmo  lib/compat.cmo lib/flags.cmo lib/smap.cmo\
   lib/segmenttree.cmo lib/unicodetable.cmo lib/util.cmo lib/errors.cmo lib/system.cmo \
   lib/envars.cmo
 

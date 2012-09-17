@@ -113,9 +113,9 @@ let check_conv_record (t1,l1) (t2,l2) =
 	lookup_canonical_conversion (proji,Default_cs),[]
     in
     let { o_DEF = c; o_INJ=n; o_TABS = bs;
-          o_TPARAMS = params; o_NPARAMS = nparams; o_TCOMPS = us } = canon_s in
+          o_TPARAMS = params; o_TCOMPS = us } = canon_s in
     let params1, c1, extra_args1 =
-      match list_chop nparams l1 with
+      match list_chop (List.length params) l1 with
 	| params1, c1::extra_args1 -> params1, c1, extra_args1
 	| _ -> raise Not_found in
     let us2,extra_args2 = list_chop (List.length us) l2_effective in

@@ -1224,7 +1224,7 @@ type ('a,'b) union = Inl of 'a | Inr of 'b
 
 module Intset = Set.Make(struct type t = int let compare = compare end)
 
-module Intmap = Map.Make(struct type t = int let compare = compare end)
+module Intmap = Smap.Make(struct type t = int let compare = compare end)
 
 let intmap_in_dom x m =
   try let _ = Intmap.find x m in true with Not_found -> false

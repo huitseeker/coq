@@ -41,6 +41,7 @@ type struc_typ = {
   s_PROJ : constant option list }
 
 let structure_table = ref (Indmap.empty : struc_typ Indmap.t)
+
 let projection_table = ref Cmap.empty
 
 let load_structure i (_,(ind,id,kl,projs)) =
@@ -168,7 +169,6 @@ that maps the pair (Li,ci) to the following data
     o_DEF = c
     o_TABS = B1...Bk
     o_PARAMS = a1...am
-    o_NARAMS = m
     o_TCOMP = ui1...uir
 
 *)
@@ -178,7 +178,6 @@ type obj_typ = {
   o_INJ : int;      (* position of trivial argument (negative= none) *)
   o_TABS : constr list;    (* ordered *)
   o_TPARAMS : constr list; (* ordered *)
-  o_NPARAMS : int;
   o_TCOMPS : constr list } (* ordered *)
 
 type cs_pattern =
@@ -187,11 +186,25 @@ type cs_pattern =
   | Sort_cs of sorts_family
   | Default_cs
 
-let object_table = ref (Refmap.empty : (cs_pattern * obj_typ) list Refmap.t)
+let proj_cs_can x y =
+  let cs_pattern_can csx csy =
+    match csx, csy with
+      | Const_cs cx, Const_cs cy -> RefOrdered.compare cx cy
+      | _,_ -> Pervasives.compare csx csy in
+  let c = cs_pattern_can (snd x) (snd y) in
+  if c = 0 then RefOrdered.compare (fst x) (fst y) else c
+
+module ProjCsOrdered = struct
+  type t = global_reference * cs_pattern
+  let compare = proj_cs_can
+end
+
+module ProjCsSmap = Smap.Make(ProjCsOrdered)
+
+let object_table = ref (ProjCsSmap.empty : obj_typ ProjCsSmap.t)
 
 let canonical_projections () =
-  Refmap.fold (fun x -> List.fold_right (fun (y,c) acc -> ((x,y),c)::acc))
-    !object_table []
+  ProjCsSmap.fold (fun x c acc -> (x,c)::acc) !object_table []
 
 let keep_true_projections projs kinds =
   map_succeed (function (p,(_,true)) -> p | _ -> failwith "")
@@ -199,19 +212,12 @@ let keep_true_projections projs kinds =
 
 let cs_pattern_of_constr t =
   match kind_of_term t with
-      App (f,vargs) ->
-	begin
-	  try  Const_cs (global_of_constr f) , -1, Array.to_list vargs with
-	      _ -> raise Not_found
-	end
+      App (f,vargs) -> Const_cs (global_of_constr f) , -1, Array.to_list vargs
     | Rel n -> Default_cs, pred n, []
-    | Prod (_,a,b) when not (Termops.dependent (mkRel 1) b) -> Prod_cs, -1, [a; Termops.pop b]
+    | Prod (_,a,b) when not (Termops.dependent (mkRel 1) b) ->
+      Prod_cs, -1, [a; Termops.pop b]
     | Sort s -> Sort_cs (family_of_sort s), -1, []
-    | _ ->
-	begin
-	  try  Const_cs (global_of_constr t) , -1, [] with
-	      _ -> raise Not_found
-	end
+    | _ -> Const_cs (global_of_constr t) , -1, []
 
 (* Intended to always succeed *)
 let compute_canonical_projections (con,ind) =
@@ -229,10 +235,8 @@ let compute_canonical_projections (con,ind) =
     List.fold_left
       (fun l (spopt,t) -> (* comp=components *)
 	 match spopt with
-           | Some proji_sp ->
-	       begin
-		 try
-		   let patt, n , args = cs_pattern_of_constr t in
+           | Some proji_sp -> begin
+             try let patt, n , args = cs_pattern_of_constr t in
 		     ((ConstRef proji_sp, patt, n, args) :: l)
 		 with Not_found ->
                    if Flags.is_verbose () then
@@ -240,15 +244,13 @@ let compute_canonical_projections (con,ind) =
                       and proji_sp_pp = Nametab.pr_global_env Idset.empty (ConstRef proji_sp) in
 		      msg_warning (str "No global reference exists for projection value"
                                    ++ Termops.print_constr t ++ str " in instance "  
-                                   ++ con_pp ++ str " of " ++ proji_sp_pp ++ str ", ignoring it."));
-		   l
+                               ++ con_pp ++ str " of " ++ proji_sp_pp
+                               ++ str ", ignoring it.")); l
 	       end
 	   | _ -> l)
       [] lps in
   List.map (fun (refi,c,inj,argj) ->
-    (refi,c),
-    {o_DEF=v; o_INJ=inj; o_TABS=lt;
-     o_TPARAMS=params; o_NPARAMS=List.length params; o_TCOMPS=argj})
+    (refi,c), {o_DEF=v; o_INJ=inj; o_TABS=lt; o_TPARAMS=params; o_TCOMPS=argj})
     comp
 
 let pr_cs_pattern = function
@@ -261,12 +263,7 @@ let open_canonical_structure i (_,o) =
   if i=1 then
     let lo = compute_canonical_projections o in
     List.iter (fun ((proj,cs_pat),s) ->
-      let l = try Refmap.find proj !object_table with Not_found -> [] in
-      let ocs = try Some (List.assoc cs_pat l)
-      with Not_found -> None
-      in match ocs with
-        | None -> object_table := Refmap.add proj ((cs_pat,s)::l) !object_table;
-        | Some cs ->
+      try let cs = (ProjCsSmap.find (proj,cs_pat) !object_table) in
             if Flags.is_verbose () then
               let old_can_s = (Termops.print_constr cs.o_DEF)
               and new_can_s = (Termops.print_constr s.o_DEF) in
@@ -274,7 +271,9 @@ let open_canonical_structure i (_,o) =
               and hd_val = (pr_cs_pattern cs_pat) in
               msg_warning (str "Ignoring canonical projection to " ++ hd_val
                              ++ str " by " ++ prj ++ str " in "
-                             ++ new_can_s ++ str ": redundant with " ++ old_can_s)) lo
+                         ++ new_can_s ++ str ": redundant with " ++ old_can_s)
+      with Not_found ->
+          object_table := ProjCsSmap.add (proj,cs_pat) s !object_table) lo
 
 let cache_canonical_structure o =
   open_canonical_structure 1 o
@@ -328,13 +327,13 @@ let declare_canonical_structure ref =
   add_canonical_structure (check_and_decompose_canonical_structure ref)
 
 let lookup_canonical_conversion (proj,pat) =
-  List.assoc pat (Refmap.find proj !object_table)
+  ProjCsSmap.find (proj,pat) !object_table
 
 let is_open_canonical_projection sigma (c,args) =
   try
-    let l = Refmap.find (global_of_constr c) !object_table in
-    let n = (snd (List.hd l)).o_NPARAMS in
-    try isEvar_or_Meta (whd_evar sigma (List.nth args n)) with Failure _ -> false
+    let n = find_projection_nparams (global_of_constr c) in
+    try isEvar_or_Meta (whd_evar sigma (List.nth args n))
+    with Failure _ -> false
   with Not_found -> false
 
 let freeze () =
@@ -345,7 +344,7 @@ let unfreeze (s,p,o) =
 
 let init () =
   structure_table := Indmap.empty; projection_table := Cmap.empty;
-  object_table := Refmap.empty
+  object_table := ProjCsSmap.empty
 
 let _ = init()
 
